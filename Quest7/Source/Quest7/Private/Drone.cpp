@@ -228,7 +228,29 @@ void ADrone::MoveUp(const FInputActionValue& value)
 	{
 		if (bIsDroneActive)
 		{
-			AddActorLocalOffset(FVector(0.0f, 0.0f, MoveInput.Z)*MoveSpeed);
+			//AddActorLocalOffset(FVector(0.0f, 0.0f, MoveInput.Z)*MoveSpeed);
+			FVector NewLocation = GetActorLocation() + FVector(0.0f, 0.0f, MoveInput.Z) * MoveSpeed;
+			// 바닥 충돌 감지
+			FHitResult HitResult;
+			FCollisionQueryParams Params;
+			Params.AddIgnoredActor(this);
+
+			FVector Start = GetActorLocation();
+			FVector End = Start + FVector(0.0f, 0.0f, MoveInput.Z * MoveSpeed);
+
+			bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_PhysicsBody, Params);
+
+			if (bHit && MoveInput.Z < 0) // 바닥과 충돌했으며 아래로 이동 중이라면
+			{
+				bIsGrounded = true;
+				Velocity.Z = 0.0f;
+				SetActorLocation(HitResult.Location + FVector(0.0f, 0.0f, 8.0f)); // 살짝 위로 보정
+			}
+			else
+			{
+				bIsGrounded = false;
+				SetActorLocation(NewLocation, true); // Sweep 적용하여 자연스러운 충돌 감지
+			}
 		}
 	}
 }
@@ -244,8 +266,17 @@ void ADrone::Look(const FInputActionValue& value)
 {
 	FVector2D LookInput = value.Get<FVector2D>();
 	AddActorLocalRotation(FRotator(0.0f, LookInput.X, 0.0f)); // 액터 회전
-	SpringArmComp->AddRelativeRotation(FRotator(LookInput.Y, 0.0f, 0.0f));
 
+	// 카메라 회전(Y축)
+	// 현재 SpringArm의 상대적 pitch 값을 가져옴
+	FRotator CurrentRotation = SpringArmComp->GetRelativeRotation();
+	float NewPitch = CurrentRotation.Pitch + LookInput.Y;
+
+	// 특정 각도 범위로 제한 (예: -45도 ~ 45도)
+	NewPitch = FMath::Clamp(NewPitch, -45.0f, 45.0f);
+
+	// 제한된 값을 적용
+	SpringArmComp->SetRelativeRotation(FRotator(NewPitch, 0.0f, 0.0f));
 }
 
 void ADrone::OnDrone(const FInputActionValue& value)
