@@ -20,6 +20,9 @@ ADrone::ADrone()
 	SkeletalMeshComp = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Skeletal Mesh"));
 	SkeletalMeshComp->SetupAttachment(RootComponent);
 
+	StaticMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OnOff Light"));
+	StaticMeshComp->SetupAttachment(SkeletalMeshComp);
+
 	SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
 	SpringArmComp->SetupAttachment(RootComponent);
 	SpringArmComp->TargetArmLength = 300.0f;
@@ -42,6 +45,37 @@ void ADrone::BeginPlay()
 void ADrone::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 중력 적용
+	if (!bIsDroneActive)
+	{
+		if (!bIsGrounded)
+		{
+			Velocity.Z += Gravity * DeltaTime;
+		}
+	}
+
+	FHitResult Hit;
+	FVector NewLocation = GetActorLocation() + Velocity * DeltaTime;
+	SetActorLocation(NewLocation, true, &Hit);
+
+	if (Hit.bBlockingHit)
+	{
+		bIsGrounded = true;
+		Velocity.Z = 0.0f;
+		if (!bIsDroneActive)
+		{
+			SetActorLocation(Hit.Location + FVector(0.0f, 0.0f, 8.0f)); // 정확한 충돌 지점으로 이동
+		}
+	}
+	else
+	{
+		bIsGrounded = false;
+	}
+
+	CheckGroundCollision();
+	
+
 	if (SkeletalMeshComp)
 	{
 		// 이동 중이 아닐 때 (bIsRecovering = true) 보간하여 복귀
@@ -100,6 +134,13 @@ void ADrone::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 					this,
 					&ADrone::MoveUp
 				);
+
+				EnhancedInput->BindAction(
+					PlayerController->OnAction,
+					ETriggerEvent::Started,
+					this,
+					&ADrone::OnDrone
+				);
 			}
 
 			if (PlayerController->LookAction)
@@ -124,18 +165,26 @@ void ADrone::MoveForward(const FInputActionValue& value)
 
 	if (!FMath::IsNearlyZero(MoveInput.X))
 	{
-		AddActorLocalOffset(FVector(MoveInput.X, 0.0f, 0.0f)*MoveSpeed);
-		// 앞으로 기울이기
-		if (MoveInput.X > 0)
+		if (bIsDroneActive)
 		{
-			TargetPitch = -MoveTilt;
+			AddActorLocalOffset(FVector(MoveInput.X, 0.0f, 0.0f) * MoveSpeed);
+			// 앞으로 기울이기
+			if (MoveInput.X > 0)
+			{
+				TargetPitch = -MoveTilt;
+			}
+			else
+			{
+				TargetPitch = MoveTilt;
+			}
+
+			bIsRecovering = false;
 		}
 		else
 		{
-			TargetPitch = MoveTilt;
+			AddActorLocalOffset(FVector(MoveInput.X, 0.0f, 0.0f) * (MoveSpeed * 0.3));
 		}
 		
-		bIsRecovering = false;
 	}
 }
 
@@ -147,18 +196,25 @@ void ADrone::MoveRight(const FInputActionValue& value)
 
 	if (!FMath::IsNearlyZero(MoveInput.Y))
 	{
-		AddActorLocalOffset(FVector(0.0f, MoveInput.Y, 0.0f)*MoveSpeed);
-
-		if (MoveInput.Y > 0)
+		if (bIsDroneActive)
 		{
-			TargetRoll = MoveTilt;
+			AddActorLocalOffset(FVector(0.0f, MoveInput.Y, 0.0f) * MoveSpeed);
+
+			if (MoveInput.Y > 0)
+			{
+				TargetRoll = MoveTilt;
+			}
+			else
+			{
+				TargetRoll = -MoveTilt;
+			}
+
+			bIsRecovering = false;
 		}
 		else
 		{
-			TargetRoll = -MoveTilt;
+			AddActorLocalOffset(FVector(0.0f, MoveInput.Y, 0.0f) * (MoveSpeed * 0.3));
 		}
-
-		bIsRecovering = false;
 	}
 }
 
@@ -170,7 +226,10 @@ void ADrone::MoveUp(const FInputActionValue& value)
 
 	if (!FMath::IsNearlyZero(MoveInput.Z))
 	{
-		AddActorLocalOffset(FVector(0.0f, 0.0f, MoveInput.Z)*MoveSpeed);
+		if (bIsDroneActive)
+		{
+			AddActorLocalOffset(FVector(0.0f, 0.0f, MoveInput.Z)*MoveSpeed);
+		}
 	}
 }
 
@@ -187,4 +246,44 @@ void ADrone::Look(const FInputActionValue& value)
 	AddActorLocalRotation(FRotator(0.0f, LookInput.X, 0.0f)); // 액터 회전
 	SpringArmComp->AddRelativeRotation(FRotator(LookInput.Y, 0.0f, 0.0f));
 
+}
+
+void ADrone::OnDrone(const FInputActionValue& value)
+{
+	UE_LOG(LogTemp, Warning, TEXT("Drone onoff"));
+	bIsDroneActive = !bIsDroneActive;
+	if (bIsDroneActive)
+	{
+		StaticMeshComp->SetMaterial(0, MaterialOn);
+	}
+	else
+	{
+		StaticMeshComp->SetMaterial(0, MaterialOff);
+	}
+}
+
+void ADrone::CheckGroundCollision()
+{
+	FVector Start = GetActorLocation();
+	FVector End = Start + FVector(0.0f, 0.0f, -50.0f);
+
+	FHitResult HitResult;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this); // 자기 자신은 제외
+
+	bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_PhysicsBody, Params);
+
+	if (bHit)
+	{
+		bIsGrounded = true;
+		Velocity.Z = 0.0f;
+		if (!bIsDroneActive)
+		{
+			SetActorLocation(HitResult.Location+FVector(0.0f, 0.0f, 8.0f)); // 정확한 충돌 위치 보정
+		}
+	}
+	else
+	{
+		bIsGrounded = false;
+	}
 }

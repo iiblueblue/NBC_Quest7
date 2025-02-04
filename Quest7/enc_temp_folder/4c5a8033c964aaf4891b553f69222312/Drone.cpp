@@ -20,6 +20,9 @@ ADrone::ADrone()
 	SkeletalMeshComp = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Skeletal Mesh"));
 	SkeletalMeshComp->SetupAttachment(RootComponent);
 
+	StaticMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OnOff Light"));
+	StaticMeshComp->SetupAttachment(SkeletalMeshComp);
+
 	SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
 	SpringArmComp->SetupAttachment(RootComponent);
 	SpringArmComp->TargetArmLength = 300.0f;
@@ -42,24 +45,58 @@ void ADrone::BeginPlay()
 void ADrone::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
+
+	// 중력 적용
+	if (!bIsDroneActive)
+	{
+		if (!bIsGrounded)
+		{
+			Velocity.Z += Gravity * DeltaTime;
+			SetActorLocation(GetActorLocation() + DeltaTime * Velocity);
+
+			FVector CurrentLocation = GetActorLocation();
+			if (CurrentLocation.Z <= 0.0f)
+			{
+				CurrentLocation.Z = 0.0f;
+				Velocity.Z = 0.0f;
+			}
+			SetActorLocation(CurrentLocation);
+		}
+	}
+
+	FHitResult Hit;
+	FVector NewLocation = GetActorLocation() + Velocity * DeltaTime;
+	SetActorLocation(NewLocation, true, &Hit);
+
+	if (Hit.bBlockingHit)
+	{
+		bIsGrounded = true;
+		Velocity.Z = 0.0f;
+	}
+	else
+	{
+		bIsGrounded = false;
+	}
+
+	CheckGroundCollision();
+	
+
 	if (SkeletalMeshComp)
 	{
-		if (bIsRecovering)
+		// 이동 중이 아닐 때 (bIsRecovering = true) 보간하여 복귀
+		if (bIsRecovering || !FMath::IsNearlyEqual(CurrentPitch, TargetPitch, 0.1f) || !FMath::IsNearlyEqual(CurrentRoll, TargetRoll, 0.1f))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Recovering!!!!!!!!!!!!!!"));
-			CurrentPitch = FMath::Lerp(CurrentPitch, TargetPitch, 0.0f);
-			CurrentRoll = FMath::Lerp(CurrentRoll, TargetRoll, 0.0f);
-		}
+			// 부드럽게 Lerp 보간 적용
+			CurrentPitch = FMath::Lerp(CurrentPitch, TargetPitch, 0.1f);
+			CurrentRoll = FMath::Lerp(CurrentRoll, TargetRoll, 0.1f);
 
-		UE_LOG(LogTemp, Warning, TEXT("Lerp!!!!!!!!!!!!!!!"));
-		SkeletalMeshComp->SetRelativeRotation(FRotator(CurrentPitch, 0.0f, CurrentRoll));
+			SkeletalMeshComp->SetRelativeRotation(FRotator(CurrentPitch, 0.0f, CurrentRoll));
 
-		if (FMath::IsNearlyZero(CurrentPitch, 0.1f) && FMath::IsNearlyZero(CurrentRoll, 0.1f))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("Recovering End!!!!!!!!!!!!!!"));
-			CurrentPitch = 0.0f;
-			CurrentRoll = 0.0f;
-			bIsRecovering = false;
+			// 목표값과 거의 일치하면 보간 종료
+			if (FMath::IsNearlyEqual(CurrentPitch, TargetPitch, 0.1f) && FMath::IsNearlyEqual(CurrentRoll, TargetRoll, 0.1f))
+			{
+				bIsRecovering = false;
+			}
 		}
 	}
 }
@@ -102,6 +139,13 @@ void ADrone::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 					this,
 					&ADrone::MoveUp
 				);
+
+				EnhancedInput->BindAction(
+					PlayerController->OnAction,
+					ETriggerEvent::Started,
+					this,
+					&ADrone::OnDrone
+				);
 			}
 
 			if (PlayerController->LookAction)
@@ -136,6 +180,7 @@ void ADrone::MoveForward(const FInputActionValue& value)
 		{
 			TargetPitch = MoveTilt;
 		}
+		
 		bIsRecovering = false;
 	}
 }
@@ -149,6 +194,17 @@ void ADrone::MoveRight(const FInputActionValue& value)
 	if (!FMath::IsNearlyZero(MoveInput.Y))
 	{
 		AddActorLocalOffset(FVector(0.0f, MoveInput.Y, 0.0f)*MoveSpeed);
+
+		if (MoveInput.Y > 0)
+		{
+			TargetRoll = MoveTilt;
+		}
+		else
+		{
+			TargetRoll = -MoveTilt;
+		}
+
+		bIsRecovering = false;
 	}
 }
 
@@ -174,8 +230,43 @@ void ADrone::StopMove(const FInputActionValue& value)
 void ADrone::Look(const FInputActionValue& value)
 {
 	FVector2D LookInput = value.Get<FVector2D>();
-
-	
 	AddActorLocalRotation(FRotator(0.0f, LookInput.X, 0.0f)); // 액터 회전
+	SpringArmComp->AddRelativeRotation(FRotator(LookInput.Y, 0.0f, 0.0f));
 
+}
+
+void ADrone::OnDrone(const FInputActionValue& value)
+{
+	UE_LOG(LogTemp, Warning, TEXT("Drone onoff"));
+	bIsDroneActive = !bIsDroneActive;
+	if (bIsDroneActive)
+	{
+		StaticMeshComp->SetMaterial(0, MaterialOn);
+	}
+	else
+	{
+		StaticMeshComp->SetMaterial(0, MaterialOff);
+	}
+}
+
+void ADrone::CheckGroundCollision()
+{
+	FVector Start = GetActorLocation();
+	FVector End = Start + FVector(0.0f, 0.0f, -10.0f);
+
+	FHitResult HitResult;
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActor(this); // 자기 자신은 제외
+
+	bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, Params);
+
+	if (bHit)
+	{
+		bIsGrounded = true;
+		Velocity.Z = 0.0f;
+	}
+	else
+	{
+		bIsGrounded = false;
+	}
 }

@@ -7,7 +7,8 @@
 AQuestPlayerController::AQuestPlayerController()
 	:InputMappingContext(nullptr),
 	MoveAction(nullptr),
-	LookAction(nullptr)
+	LookAction(nullptr),
+	OnAction(nullptr)
 {
 }
 
