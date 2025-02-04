@@ -14,20 +14,25 @@ ADrone::ADrone()
  	// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = true;
 
+	// Sphere Component(Root Component)
 	SphereComp = CreateDefaultSubobject<USphereComponent>(TEXT("Sphere Component(Collision)"));
 	SetRootComponent(SphereComp);
 
+	// Skeletal Mesh Component
 	SkeletalMeshComp = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("Skeletal Mesh"));
 	SkeletalMeshComp->SetupAttachment(RootComponent);
 
+	// Static Mesh Component
 	StaticMeshComp = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OnOff Light"));
 	StaticMeshComp->SetupAttachment(SkeletalMeshComp);
 
+	// Spring Arm Component
 	SpringArmComp = CreateDefaultSubobject<USpringArmComponent>(TEXT("Spring Arm"));
 	SpringArmComp->SetupAttachment(RootComponent);
 	SpringArmComp->TargetArmLength = 300.0f;
 	SpringArmComp->bUsePawnControlRotation = false;
 
+	// Camera Component
 	CameraComp = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	CameraComp->SetupAttachment(SpringArmComp, USpringArmComponent::SocketName);
 	CameraComp->bUsePawnControlRotation = false;
@@ -47,35 +52,38 @@ void ADrone::Tick(float DeltaTime)
 	Super::Tick(DeltaTime);
 
 	// 중력 적용
-	if (!bIsDroneActive)
+	if (!bIsDroneActive) // 드론이 꺼져 있을 때
 	{
-		if (!bIsGrounded)
+		if (!bIsGrounded) // 공중에 있을 때
 		{
-			Velocity.Z += Gravity * DeltaTime;
+			Velocity.Z += Gravity * DeltaTime; // Velocity = Velocity + (Gravity * DeltaTime)
 		}
 	}
 
+	// 위치 업데이트
 	FHitResult Hit;
-	FVector NewLocation = GetActorLocation() + Velocity * DeltaTime;
-	SetActorLocation(NewLocation, true, &Hit);
+	FVector NewLocation = GetActorLocation() + Velocity * DeltaTime; // Position = Position + (Velocity * DeltaTime)
+	SetActorLocation(NewLocation, true, &Hit); // 위치 변경
 
-	if (Hit.bBlockingHit)
+	// 충돌 감지
+	if (Hit.bBlockingHit) // 바닥과 충돌하였을 때
 	{
-		bIsGrounded = true;
-		Velocity.Z = 0.0f;
-		if (!bIsDroneActive)
+		bIsGrounded = true; // 바닥에 있음 표시
+		Velocity.Z = 0.0f; // 속도 0 처리
+		if (!bIsDroneActive) // 드론이 꺼져 있다면
 		{
-			SetActorLocation(Hit.Location + FVector(0.0f, 0.0f, 8.0f)); // 정확한 충돌 지점으로 이동
+			SetActorLocation(Hit.Location + FVector(0.0f, 0.0f, 8.0f)); // 정확한 충돌 지점으로 이동(위치 보정)
 		}
 	}
-	else
+	else // 공중에 있을 때
 	{
-		bIsGrounded = false;
+		bIsGrounded = false; // 바닥에 있지 않음 표시
 	}
 
-	CheckGroundCollision();
+	CheckGroundCollision(); // 추가적인 바닥 충돌 검사
 	
 
+	// 이동 방향에 따라 드론 기울이고 복귀시키기
 	if (SkeletalMeshComp)
 	{
 		// 이동 중이 아닐 때 (bIsRecovering = true) 보간하여 복귀
@@ -85,12 +93,12 @@ void ADrone::Tick(float DeltaTime)
 			CurrentPitch = FMath::Lerp(CurrentPitch, TargetPitch, 0.1f);
 			CurrentRoll = FMath::Lerp(CurrentRoll, TargetRoll, 0.1f);
 
-			SkeletalMeshComp->SetRelativeRotation(FRotator(CurrentPitch, 0.0f, CurrentRoll));
+			SkeletalMeshComp->SetRelativeRotation(FRotator(CurrentPitch, 0.0f, CurrentRoll)); // Skeletal Mesh 회전
 
 			// 목표값과 거의 일치하면 보간 종료
 			if (FMath::IsNearlyEqual(CurrentPitch, TargetPitch, 0.1f) && FMath::IsNearlyEqual(CurrentRoll, TargetRoll, 0.1f))
 			{
-				bIsRecovering = false;
+				bIsRecovering = false; 
 			}
 		}
 	}
