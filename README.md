@@ -4,6 +4,12 @@
 
 
 이동 - WASD
+
+
 상승 - Space Bar
+
+
 하강 - Shift
+
+
 드론 on/off - E
